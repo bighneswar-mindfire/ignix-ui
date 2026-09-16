@@ -12,7 +12,7 @@
 
 "use client";
 
-import React, { useEffect, useId, useState } from "react";
+import React, { useId, useState, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import { Menu, X, ArrowRight, ChevronDown, Zap, Palette, ShieldCheck, Quote } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -45,8 +45,35 @@ function readThemeMode(): "light" | "dark" {
   const root = document.documentElement;
   const body = document.body;
   const hasDarkClass = root.classList.contains("dark") || body.classList.contains("dark");
-  const hasDarkThemeAttr = root.getAttribute("data-theme") === "dark";
+  // The dark: variant contract matches [data-theme="dark"] on any ancestor,
+  // not just <html> - the .dark class check above already covers both root
+  // and body, so data-theme should too, or a consumer app that sets
+  // data-theme="dark" on <body> (a perfectly valid choice under that
+  // contract) would style the rest of the page dark while this hook still
+  // reports "light".
+  const hasDarkThemeAttr = root.getAttribute("data-theme") === "dark" || body.getAttribute("data-theme") === "dark";
   return hasDarkClass || hasDarkThemeAttr ? "dark" : "light";
+}
+
+/** Watches for theme-affecting DOM mutations, for `useThemeMode`'s `useSyncExternalStore` subscription. */
+function subscribeToThemeMode(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+
+  const root = document.documentElement;
+  const body = document.body;
+
+  const observer = new MutationObserver(callback);
+  observer.observe(root, { attributes: true, attributeFilter: ["class", "data-theme"] });
+  observer.observe(body, { attributes: true, attributeFilter: ["class", "data-theme"] });
+
+  return () => {
+    observer.disconnect();
+  };
+}
+
+/** This template has no way to know the real theme before hydration, so the server always renders "light". */
+function getServerThemeSnapshot(): "light" | "dark" {
+  return "light";
 }
 
 /**
@@ -65,34 +92,16 @@ function readThemeMode(): "light" | "dark" {
  * with OS-level dark mode enabled (but no `.dark` class present, e.g. a
  * default Storybook page) would get `variant="dark"` - white heading text -
  * rendered over the still-light background, making it unreadable.
+ *
+ * Built on `useSyncExternalStore` rather than `useState`+`useEffect` - it's
+ * the React-recommended primitive for exactly this shape of external,
+ * mutable source, and it also removes the flash-of-wrong-theme problem a
+ * `useState` lazy initializer previously worked around by hand: the first
+ * client render already reflects the DOM's real state (`readThemeMode` is
+ * the client snapshot) instead of a hardcoded guess.
  */
 function useThemeMode(): "light" | "dark" {
-  // Lazy initializer instead of a hardcoded "light" default: without this,
-  // a page that's already in dark mode still renders the Hero's light
-  // variant for one frame (state starts "light" and only flips to "dark"
-  // once the effect below runs after the initial paint) - a visible flash
-  // of the wrong theme. Reading the DOM synchronously here means the very
-  // first render already reflects reality instead of a hardcoded guess.
-  const [theme, setTheme] = useState<"light" | "dark">(readThemeMode);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const root = document.documentElement;
-    const body = document.body;
-
-    setTheme(readThemeMode());
-
-    const observer = new MutationObserver(() => setTheme(readThemeMode()));
-    observer.observe(root, { attributes: true, attributeFilter: ["class", "data-theme"] });
-    observer.observe(body, { attributes: true, attributeFilter: ["class"] });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
-  return theme;
+  return useSyncExternalStore(subscribeToThemeMode, readThemeMode, getServerThemeSnapshot);
 }
 
 /**

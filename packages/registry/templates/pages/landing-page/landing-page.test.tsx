@@ -348,6 +348,8 @@ describe("LandingHero", () => {
   afterEach(() => {
     document.documentElement.classList.remove("dark", "light");
     document.documentElement.removeAttribute("data-theme");
+    document.body.classList.remove("dark", "light");
+    document.body.removeAttribute("data-theme");
   });
 
   it("passes variant=\"default\" to Hero when the page is in light mode", async () => {
@@ -369,6 +371,30 @@ describe("LandingHero", () => {
     document.documentElement.setAttribute("data-theme", "dark");
     await act(async () => {
       render(<LandingHero />);
+    });
+    expect(screen.getByTestId("hero")).toHaveAttribute("data-variant", "dark");
+  });
+
+  it("passes variant=\"dark\" to Hero when data-theme=\"dark\" is set on <body> instead of <html>", async () => {
+    // The dark: variant contract (@custom-variant dark) matches
+    // [data-theme="dark"] on any ancestor, not just <html> - a consumer app
+    // could legitimately set it on <body>, the same way the .dark class
+    // check already covers both elements.
+    document.body.setAttribute("data-theme", "dark");
+    await act(async () => {
+      render(<LandingHero />);
+    });
+    expect(screen.getByTestId("hero")).toHaveAttribute("data-variant", "dark");
+  });
+
+  it("detects a data-theme=\"dark\" attribute added to <body> after mount", async () => {
+    await act(async () => {
+      render(<LandingHero />);
+    });
+    expect(screen.getByTestId("hero")).toHaveAttribute("data-variant", "default");
+
+    await act(async () => {
+      document.body.setAttribute("data-theme", "dark");
     });
     expect(screen.getByTestId("hero")).toHaveAttribute("data-variant", "dark");
   });
